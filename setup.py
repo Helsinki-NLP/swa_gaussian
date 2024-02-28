@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 import os
 import sys
 
@@ -12,15 +12,16 @@ else:
         long_description = f.read()
 
 setup(
-    name="swag",
-    version="0.0",
+    name="swa_gaussian",
     description=("SWA-Gaussian repo"),
     long_description=long_description,
     author="Wesley Maddox, Timur Garipov, Pavel Izmailov, Dmitry Vetrov, Andrew Gordon Wilson",
     author_email="wm326@cornell.edu",
-    url="https://github.com/wjmaddox/swa_gaussian",
-    license="MPL-2.0",
-    packages=["swag"],
+    url="https://github.com/Helsinki-NLP/swa_gaussian",
+    maintainer="Sami Virpioja",
+    maintainer_email="sami.virpioja@helsinki.fi",
+    license="BSD",
+    packages=find_packages(include=["swag", "swag.*"]),
     install_requires=[
         "tqdm>=4.26.0",
         "numpy>=1.14.3",
@@ -34,10 +35,11 @@ setup(
         "Pillow>=5.4.1",
         "scikit_learn>=0.20.2",
     ],
-    include_package_data=True,
     classifiers=[
-        "Development Status :: 0",
+        "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
         "Programming Language :: Python :: 3.6",
     ],
+    python_requires=">=3.6",
+    use_scm_version=True
 )
