@@ -69,6 +69,23 @@ class SWAG(torch.nn.Module):
             return self.base.device
         return 'cpu'
 
+    def get_logits(
+            self, *args, num_predictions=None, scale=1.0, cov=True, block=False, **kwargs
+    ):
+        if num_predictions is None:
+            sample = False
+            num_predictions = 1
+        else:
+            sample = True
+        logits = []
+        for _ in range(num_predictions):
+            if sample:
+                self.sample(scale=scale, cov=cov, block=block)
+            out = self.forward(*args, **kwargs)
+            logits.append(out.logits)
+        logits = torch.permute(torch.stack(logits), (1, 0, 2))  # [batch_size, num_predictions, labels]
+        return logits
+
     def forward(self, *args, **kwargs):
         return self.base(*args, **kwargs)
 
