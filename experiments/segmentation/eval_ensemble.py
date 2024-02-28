@@ -86,6 +86,12 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 eps = 1e-12
 if args.cov_mat:
     args.cov_mat = True
@@ -94,7 +100,8 @@ else:
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 model_cfg = getattr(models, "FCDenseNet67")
 loaders, num_classes = data.loaders(
@@ -123,6 +130,7 @@ if args.method in ["SWAG", "HomoNoise", "SWAGDrop"]:
         max_num_models=20,
         num_classes=num_classes,
         use_aleatoric=args.loss == "aleatoric",
+        device=args.device
     )
 
 elif args.method in ["SGD", "Dropout"]:
@@ -130,9 +138,9 @@ elif args.method in ["SGD", "Dropout"]:
     model = model_cfg.base(
         num_classes=num_classes, use_aleatoric=args.loss == "aleatoric"
     )
+    model.to(args.device)
 else:
     assert False
-model.cuda()
 
 
 def train_dropout(m):
@@ -179,7 +187,7 @@ for i in range(args.N):
     k = 0
     current_predictions = np.zeros_like(predictions)
     for input, target in tqdm.tqdm(loaders["test"]):
-        input = input.cuda(non_blocking=True)
+        input = input.to(args.device, non_blocking=True)
         torch.manual_seed(i)
 
         with torch.no_grad():

@@ -162,14 +162,17 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-if torch.cuda.is_available():
+
+use_cuda = torch.cuda.is_available()
+if use_cuda:
     args.device = torch.device("cuda")
 else:
     args.device = torch.device("cpu")
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 print("Preparing directory %s" % args.dir)
 os.makedirs(args.dir, exist_ok=True)
@@ -202,7 +205,7 @@ model = model_cfg.base(
     **model_cfg.kwargs,
     use_aleatoric=args.loss == "aleatoric"
 )
-model.cuda()
+model.to(args.device)
 model.apply(train_utils.weights_init)
 
 if args.optimizer == "RMSProp":
@@ -237,7 +240,7 @@ if args.use_weights:
             3.2375309467316,
             4.1312313079834,
         ]
-    ).cuda()
+    ).to(args.device)
 
     criterion = partial(criterion, weight=class_weights)
 
@@ -259,9 +262,9 @@ if args.swa:
         *model_cfg.args,
         num_classes=num_classes,
         use_aleatoric=args.loss == "aleatoric",
+        device=args.device,
         **model_cfg.kwargs
     )
-    swag_model.to(args.device)
 else:
     print("SGD training")
 
@@ -274,9 +277,9 @@ if args.swa and args.swa_resume is not None:
         *model_cfg.args,
         num_classes=num_classes,
         use_aleatoric=args.loss == "aleatoric",
+        device=args.device,
         **model_cfg.kwargs
     )
-    swag_model.to(args.device)
     swag_model.load_state_dict(checkpoint["state_dict"])
 
 for epoch in range(start_epoch, args.epochs + 1):
@@ -287,7 +290,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         print("Now replacing data loader with fine-tuned data loader.")
         train_loader = loaders["fine_tune"]
 
-    trn_loss, trn_err = train_utils.train(model, train_loader, optimizer, criterion)
+    trn_loss, trn_err = train_utils.train(model, train_loader, optimizer, criterion, args.device)
     print(
         "Epoch {:d}\nTrain - Loss: {:.4f}, Acc: {:.4f}".format(
             epoch, trn_loss, 1 - trn_err
@@ -298,7 +301,7 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     if epoch % args.eval_freq is 0:
         ### Test ###
-        val_loss, val_err, val_iou = train_utils.test(model, loaders["val"], criterion)
+        val_loss, val_err, val_iou = train_utils.test(model, loaders["val"], criterion, args.device)
         print(
             "Val - Loss: {:.4f} | Acc: {:.4f} | IOU: {:.4f}".format(
                 val_loss, 1 - val_err, val_iou
@@ -320,7 +323,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             swag_model.sample(0.0)
             bn_update(train_loader, swag_model)
             val_loss, val_err, val_iou = train_utils.test(
-                swag_model, loaders["val"], criterion
+                swag_model, loaders["val"], criterion, args.device
             )
             print(
                 "SWA Val - Loss: {:.4f} | Acc: {:.4f} | IOU: {:.4f}".format(
@@ -363,7 +366,7 @@ if args.swa:
     swag_model.sample(0.0)
     bn_update(train_loader, swag_model)
     test_loss, test_err, test_iou = train_utils.test(
-        swag_model, loaders["test"], criterion
+        swag_model, loaders["test"], criterion, args.device
     )
     print(
         "SWA Test - Loss: {:.4f} | Acc: {:.4f} | IOU: {:.4f}".format(
@@ -371,7 +374,7 @@ if args.swa:
         )
     )
 
-test_loss, test_err, test_iou = train_utils.test(model, loaders["test"], criterion)
+test_loss, test_err, test_iou = train_utils.test(model, loaders["test"], criterion, args.device)
 print(
     "SGD Test - Loss: {:.4f} | Acc: {:.4f} | IOU: {:.4f}".format(
         test_loss, 1 - test_err, test_iou

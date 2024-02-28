@@ -128,6 +128,12 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 print("Preparing directory %s" % args.dir)
 os.makedirs(args.dir, exist_ok=True)
 with open(os.path.join(args.dir, "command.sh"), "w") as f:
@@ -136,7 +142,8 @@ with open(os.path.join(args.dir, "command.sh"), "w") as f:
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 print("Using model %s" % args.model)
 model_cfg = getattr(models, args.model)
@@ -166,15 +173,14 @@ num_classes = max(train_set.train_labels) + 1
 
 print("Preparing model")
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-model.cuda()
+model.to(args.device)
 
 
 if args.swa:
     print("SWA training")
     swa_model = model_cfg.base(
-        *model_cfg.args, num_classes=num_classes, **model_cfg.kwargs
+        *model_cfg.args, num_classes=num_classes, device=args.device, **model_cfg.kwargs
     )
-    swa_model.cuda()
     swa_n = 0
 else:
     print("SGD training")

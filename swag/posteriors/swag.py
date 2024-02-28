@@ -33,8 +33,9 @@ def swag_parameters(module, params, no_cov_mat=True):
 
 
 class SWAG(torch.nn.Module):
+
     def __init__(
-        self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, *args, **kwargs
+            self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, device=None, *args, **kwargs
     ):
         super(SWAG, self).__init__()
 
@@ -52,6 +53,21 @@ class SWAG(torch.nn.Module):
                 module=module, params=self.params, no_cov_mat=self.no_cov_mat
             )
         )
+        if device is not None:
+            self._device = device
+        elif hasattr(self.base, 'device'):
+            self._device = self.base.device
+        else:
+            self._device = 'cpu'
+        self.to(self.device)
+
+    @property
+    def device(self):
+        if hasattr(self, '_device'):
+            return self._device
+        if hasattr(self.base, 'device'):
+            return self.base.device
+        return 'cpu'
 
     def forward(self, *args, **kwargs):
         return self.base(*args, **kwargs)
@@ -143,7 +159,7 @@ class SWAG(torch.nn.Module):
         samples_list = unflatten_like(sample, mean_list)
 
         for (module, name), sample in zip(self.params, samples_list):
-            module.__setattr__(name, sample.cuda())
+            module.__setattr__(name, sample.to(self.device))
 
     def collect_model(self, base_model):
         for (module, name), base_param in zip(self.params, base_model.parameters()):

@@ -209,9 +209,9 @@ if args.swa:
         max_num_models=args.max_num_models,
         *model_cfg.args,
         num_classes=num_classes,
+        device=args.device,
         **model_cfg.kwargs
     )
-    swag_model.to(args.device)
 else:
     print("SGD training")
 
@@ -343,10 +343,10 @@ for epoch in range(start_epoch, args.epochs):
             )
 
     time_ep = time.time() - time_ep
-    
+
     if use_cuda:
         memory_usage = torch.cuda.memory_allocated() / (1024.0 ** 3)
-        
+
     values = [
         epoch + 1,
         lr,

@@ -85,6 +85,12 @@ def nll(outputs, labels):
 
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 eps = 1e-12
 if args.cov_mat:
     args.cov_mat = True
@@ -93,7 +99,8 @@ else:
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 print("Using model %s" % args.model)
 model_cfg = getattr(models, args.model)
@@ -122,13 +129,14 @@ if args.method in ["SWAG", "HomoNoise", "SWAGDrop"]:
         max_num_models=20,
         *model_cfg.args,
         num_classes=num_classes,
+        device=args.device,
         **model_cfg.kwargs
     )
 elif args.method in ["SGD", "Dropout", "KFACLaplace"]:
     model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
+    model.to(args.device)
 else:
     assert False
-model.cuda()
 
 
 def train_dropout(m):
@@ -148,8 +156,8 @@ if args.method == "KFACLaplace":
 
     t_input, t_target = next(iter(loaders["train"]))
     t_input, t_target = (
-        t_input.cuda(non_blocking=True),
-        t_target.cuda(non_blocking=True),
+        t_input.to(args.device, non_blocking=True),
+        t_target.to(args.device, non_blocking=True),
     )
 
 if args.method == "HomoNoise":
@@ -191,7 +199,7 @@ for i in range(args.N):
 
     k = 0
     for input, target in tqdm.tqdm(loaders["test"]):
-        input = input.cuda(non_blocking=True)
+        input = input.to(args.device, non_blocking=True)
         ##TODO: is this needed?
         # if args.method == 'Dropout':
         #    model.apply(train_dropout)

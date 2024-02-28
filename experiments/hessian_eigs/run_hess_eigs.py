@@ -66,9 +66,16 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 print("Using model %s" % args.model)
 model_cfg = getattr(models, args.model)
@@ -87,7 +94,7 @@ loaders, num_classes = data.loaders(
 )
 
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-model.cuda()
+model.to(args.device)
 
 print("Loading model %s" % args.file)
 checkpoint = torch.load(args.file)
@@ -101,7 +108,7 @@ else:
     loader = loaders["train"]
 
 max_eval, min_eval, hvps, pos_evals, neg_evals = min_max_hessian_eigs(
-    model, loader, criterion, use_cuda=True, verbose=True
+    model, loader, criterion, args.device, verbose=True
 )
 
 print("Maximum eigenvalue: ", max_eval)

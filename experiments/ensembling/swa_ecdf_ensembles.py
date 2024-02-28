@@ -85,9 +85,16 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 
 def find_models(dir, model_name="checkpoint", start_epoch=161, finish_epoch=325):
@@ -129,7 +136,7 @@ loaders, num_classes = data.loaders(
 
 print("Preparing model")
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-model.cuda()
+model.to(args.device)
 model.eval()
 
 print("using cross-entropy loss")
@@ -170,7 +177,7 @@ for i, ckpt in enumerate(dir_locs):
         k = 0
         with torch.no_grad():
             for input, target in tqdm.tqdm(loaders["test"]):
-                input = input.cuda(non_blocking=True)
+                input = input.to(args.device, non_blocking=True)
                 torch.manual_seed(1)
 
                 output = model(input)

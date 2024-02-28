@@ -96,8 +96,8 @@ class KFACLaplace(torch.optim.Optimizer):
         super(KFACLaplace, self).__init__(self.params, {})
         # super(KFACLaplace, self).__init__()
 
-    def cuda(self):
-        self.net.cuda()
+    def to(self, device):
+        self.net.to(device)
 
     def load_state_dict(self, checkpoint, **kwargs):
         self.net.load_state_dict(checkpoint, **kwargs)
@@ -157,7 +157,6 @@ class KFACLaplace(torch.optim.Optimizer):
                 sample = ixxt_chol.matmul(z.matmul(iggt_chol)).t()
                 # sample = ixxt_chol.cpu().matmul(z.matmul(iggt_chol.cpu())).t()
                 sample *= scale / self.data_size  # scale/N term for inverse
-                # sample = sample.cuda()
 
                 if bias is not None:
                     # print(weight.shape, bias.shape, sample.shape)

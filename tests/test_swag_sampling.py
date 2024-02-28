@@ -12,6 +12,13 @@ torch.backends.cudnn.deterministic = True
 
 
 class Test_SWAG_Sampling(unittest.TestCase):
+
+    device = torch.device("cpu")
+
+    def setUp(self):
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+
     def test_swag_cov(self, **kwargs):
         model = torch.nn.Linear(300, 3, bias=True)
 
@@ -22,7 +29,8 @@ class Test_SWAG_Sampling(unittest.TestCase):
             bias=True,
             no_cov_mat=False,
             max_num_models=100,
-            loading=False,
+            # loading=False,
+            device=self.device
         )
 
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -60,9 +68,9 @@ class Test_SWAG_Sampling(unittest.TestCase):
             sq_mean_list.append(sq_mean)
             cov_mat_sqrt_list.append(cov_mat_sqrt)
 
-        mean = flatten(mean_list).cuda()
-        sq_mean = flatten(sq_mean_list).cuda()
-        cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1).cuda()
+        mean = flatten(mean_list).to(self.device)
+        sq_mean = flatten(sq_mean_list).to(self.device)
+        cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1).to(self.device)
 
         true_cov_mat = (
             1.0 / (swag_model.max_num_models - 1)
@@ -106,7 +114,7 @@ class Test_SWAG_Sampling(unittest.TestCase):
             bias=True,
             no_cov_mat=True,
             max_num_models=100,
-            loading=False,
+            # loading=False,
         )
 
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -138,8 +146,8 @@ class Test_SWAG_Sampling(unittest.TestCase):
             mean_list.append(mean)
             sq_mean_list.append(sq_mean)
 
-        mean = flatten(mean_list).cuda()
-        sq_mean = flatten(sq_mean_list).cuda()
+        mean = flatten(mean_list).to(self.device)
+        sq_mean = flatten(sq_mean_list).to(self.device)
 
         for scale in [0.01, 0.1, 0.5, 1.0, 2.0, 5.0]:
             var = scale * (sq_mean - mean ** 2)

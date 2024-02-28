@@ -158,7 +158,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 args.device = None
-if torch.cuda.is_available():
+use_cuda = torch.cuda.is_available()
+if use_cuda:
     args.device = torch.device("cuda")
 else:
     args.device = torch.device("cpu")
@@ -171,7 +172,8 @@ with open(os.path.join(args.dir, "command.sh"), "w") as f:
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 print("Using model %s" % args.model)
 model_cfg = getattr(models, args.model)
@@ -206,6 +208,7 @@ if args.swa:
         max_num_models=20,
         *model_cfg.args,
         num_classes=num_classes,
+        device=args.device,
         **model_cfg.kwargs
     )
     swag_model.to(args.device)
@@ -253,6 +256,7 @@ if args.swa and args.swa_resume is not None:
         loading=True,
         *model_cfg.args,
         num_classes=num_classes,
+        device=args.device,
         **model_cfg.kwargs
     )
     swag_model.to(args.device)
@@ -290,6 +294,7 @@ for epoch in range(start_epoch, args.epochs):
             model,
             criterion,
             optimizer,
+            args.device,
             model_grads_list,
             verbose=True,
         )
@@ -299,6 +304,7 @@ for epoch in range(start_epoch, args.epochs):
             model,
             criterion,
             optimizer,
+            args.device,
             model_grads_list,
             verbose=True,
         )

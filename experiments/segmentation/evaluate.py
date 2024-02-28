@@ -75,9 +75,16 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+use_cuda = torch.cuda.is_available()
+if use_cuda:
+    args.device = torch.device("cuda")
+else:
+    args.device = torch.device("cpu")
+
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if use_cuda:
+    torch.cuda.manual_seed(args.seed)
 
 model_cfg = getattr(models, "FCDenseNet67")
 loaders, num_classes = data.loaders(
@@ -93,7 +100,6 @@ loaders, num_classes = data.loaders(
     target_transform=model_cfg.target_transform,
 )
 
-# criterion = nn.NLLLoss(weight=camvid.class_weight[:-1].cuda(), reduction='none').cuda()
 if args.loss == "cross_entropy":
     criterion = losses.seg_cross_entropy
 else:
@@ -108,8 +114,8 @@ if args.swa_resume is not None:
         max_num_models=20,
         num_classes=num_classes,
         use_aleatoric=args.loss == "aleatoric",
+        device=args.device
     )
-    model.cuda()
     model.load_state_dict(checkpoint["state_dict"])
 
     model.sample(0.0)
@@ -117,7 +123,7 @@ if args.swa_resume is not None:
 else:
     model = model_cfg.base(
         num_classes=num_classes, use_aleatoric=args.loss == "aleatoric"
-    ).cuda()
+    ).to(args.device)
     checkpoint = torch.load(args.resume)
     start_epoch = checkpoint["epoch"]
     print(start_epoch)

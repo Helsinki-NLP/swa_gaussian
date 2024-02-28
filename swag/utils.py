@@ -51,7 +51,7 @@ def train_epoch(
     model,
     criterion,
     optimizer,
-    cuda=True,
+    device,
     regression=False,
     verbose=False,
     subset=None,
@@ -73,9 +73,8 @@ def train_epoch(
         loader = tqdm.tqdm(loader, total=num_batches)
 
     for i, (input, target) in enumerate(loader):
-        if cuda:
-            input = input.cuda(non_blocking=True)
-            target = target.cuda(non_blocking=True)
+        input = input.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
 
         loss, output = criterion(model, input, target)
 
@@ -108,7 +107,7 @@ def train_epoch(
     }
 
 
-def eval(loader, model, criterion, cuda=True, regression=False, verbose=False):
+def eval(loader, model, criterion, device, regression=False, verbose=False):
     loss_sum = 0.0
     correct = 0.0
     num_objects_total = len(loader.dataset)
@@ -119,9 +118,8 @@ def eval(loader, model, criterion, cuda=True, regression=False, verbose=False):
         if verbose:
             loader = tqdm.tqdm(loader)
         for i, (input, target) in enumerate(loader):
-            if cuda:
-                input = input.cuda(non_blocking=True)
-                target = target.cuda(non_blocking=True)
+            input = input.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
 
             loss, output = criterion(model, input, target)
 
@@ -137,7 +135,7 @@ def eval(loader, model, criterion, cuda=True, regression=False, verbose=False):
     }
 
 
-def predict(loader, model, verbose=False):
+def predict(loader, model, device, verbose=False):
     predictions = list()
     targets = list()
 
@@ -149,7 +147,7 @@ def predict(loader, model, verbose=False):
     offset = 0
     with torch.no_grad():
         for input, target in loader:
-            input = input.cuda(non_blocking=True)
+            input = input.to(device, non_blocking=True)
             output = model(input)
 
             batch_size = input.size(0)
@@ -193,7 +191,7 @@ def _set_momenta(module, momenta):
         module.momentum = momenta[module]
 
 
-def bn_update(loader, model, verbose=False, subset=None, **kwargs):
+def bn_update(loader, model, device, verbose=False, subset=None, **kwargs):
     """
         BatchNorm buffers update (if any).
         Performs 1 epochs to estimate buffers average using train dataset.
@@ -219,7 +217,7 @@ def bn_update(loader, model, verbose=False, subset=None, **kwargs):
 
             loader = tqdm.tqdm(loader, total=num_batches)
         for input, _ in loader:
-            input = input.cuda(non_blocking=True)
+            input = input.to(device, non_blocking=True)
             input_var = torch.autograd.Variable(input)
             b = input_var.data.size(0)
 
@@ -237,7 +235,7 @@ def inv_softmax(x, eps=1e-10):
     return torch.log(x / (1.0 - x + eps))
 
 
-def predictions(test_loader, model, seed=None, cuda=True, regression=False, **kwargs):
+def predictions(test_loader, model, device, seed=None, regression=False, **kwargs):
     # will assume that model is already in eval mode
     # model.eval()
     preds = []
@@ -245,8 +243,7 @@ def predictions(test_loader, model, seed=None, cuda=True, regression=False, **kw
     for input, target in test_loader:
         if seed is not None:
             torch.manual_seed(seed)
-        if cuda:
-            input = input.cuda(non_blocking=True)
+        input = input.to(device, non_blocking=True)
         output = model(input, **kwargs)
         if regression:
             preds.append(output.cpu().data.numpy())

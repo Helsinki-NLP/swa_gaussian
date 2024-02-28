@@ -28,23 +28,23 @@ def weights_init(m):
         m.bias.data.zero_()
 
 
-def predict(model, input_loader, n_batches=1):
+def predict(model, input_loader, device, n_batches=1):
     input_loader.batch_size = 1
     predictions = []
     model.eval()
     for input, target in input_loader:
-        data = Variable(input.cuda(), volatile=True)
-        label = Variable(target.cuda())
+        data = Variable(input.to(device), volatile=True)
+        label = Variable(target.to(device))
         output = model(data)
         pred = get_predictions(output)
         predictions.append([input, target, pred])
     return predictions
 
 
-def view_sample_predictions(model, loader, n):
+def view_sample_predictions(model, loader, n, device):
     inputs, targets = next(iter(loader))
-    data = Variable(inputs.cuda(), volatile=True)
-    label = Variable(targets.cuda())
+    data = Variable(inputs.to(device), volatile=True)
+    label = Variable(targets.to(device))
     output = model(data)
     pred = get_predictions(output)
     batch_size = inputs.size(0)
@@ -62,13 +62,13 @@ def get_predictions(output_batch):
     return indices
 
 
-def train(model, trn_loader, optimizer, criterion):
+def train(model, trn_loader, optimizer, criterion, device):
     model.train()
     trn_loss = 0
     trn_error = 0
     for idx, (inputs, targets) in enumerate(trn_loader):
-        inputs = inputs.cuda(non_blocking=True)
-        targets = targets.cuda(non_blocking=True)
+        inputs = inputs.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
 
         optimizer.zero_grad()
         loss_dict = criterion(model, inputs, targets)
@@ -93,6 +93,7 @@ def test(
     model,
     test_loader,
     criterion,
+    device,
     num_classes=11,
     return_outputs=False,
     return_scale=False,
@@ -111,8 +112,8 @@ def test(
             scale_list = []
 
         for data, target in test_loader:
-            data = data.cuda(non_blocking=True)
-            target = target.cuda(non_blocking=True)
+            data = data.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
             output = model(data)
 
             loss_dict = criterion(model, data, target)
