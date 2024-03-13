@@ -7,6 +7,7 @@ import numpy as np
 import itertools
 from torch.distributions.normal import Normal
 import copy
+import logging
 
 import gpytorch
 from gpytorch.lazy import RootLazyTensor, DiagLazyTensor, AddedDiagLazyTensor
@@ -15,12 +16,19 @@ from gpytorch.distributions import MultivariateNormal
 from ..utils import flatten, unflatten_like
 
 
+logger = logging.getLogger(__name__)
+
+
 def swag_parameters(module, params, no_cov_mat=True):
     for name in list(module._parameters.keys()):
         if module._parameters[name] is None:
             continue
         data = module._parameters[name].data
         module._parameters.pop(name)
+        # Add dummy values also for the original parameter names, as
+        # they are required for printing the model without errors.
+        # Sampling will overwrite the values.
+        module.register_buffer(name, data.new(data.size()).zero_())
         module.register_buffer("%s_mean" % name, data.new(data.size()).zero_())
         module.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
 
@@ -53,6 +61,7 @@ class SWAG(torch.nn.Module):
                 module=module, params=self.params, no_cov_mat=self.no_cov_mat
             )
         )
+        self._base_params_set = False
         if device is not None:
             self._device = device
         elif hasattr(self.base, 'device'):
@@ -70,6 +79,8 @@ class SWAG(torch.nn.Module):
         return 'cpu'
 
     def forward(self, *args, **kwargs):
+        if not self._base_params_set:
+            logger.warning("You should first sample parameters for the base model!")
         return self.base(*args, **kwargs)
 
     def sample(self, scale=1.0, cov=False, seed=None, block=False, fullrank=True):
@@ -80,6 +91,7 @@ class SWAG(torch.nn.Module):
             self.sample_fullrank(scale, cov, fullrank)
         else:
             self.sample_blockwise(scale, cov, fullrank)
+        self._base_params_set = True
 
     def sample_blockwise(self, scale, cov, fullrank):
         for module, name in self.params:
