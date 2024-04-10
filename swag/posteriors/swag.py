@@ -43,7 +43,7 @@ def swag_parameters(module, params, no_cov_mat=True):
 class SWAG(torch.nn.Module):
 
     def __init__(
-            self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, device=None, *args, **kwargs
+            self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, *args, **kwargs
     ):
         super(SWAG, self).__init__()
 
@@ -62,21 +62,6 @@ class SWAG(torch.nn.Module):
             )
         )
         self._base_params_set = False
-        if device is not None:
-            self._device = device
-        elif hasattr(self.base, 'device'):
-            self._device = self.base.device
-        else:
-            self._device = 'cpu'
-        self.to(self.device)
-
-    @property
-    def device(self):
-        if hasattr(self, '_device'):
-            return self._device
-        if hasattr(self.base, 'device'):
-            return self.base.device
-        return 'cpu'
 
     def forward(self, *args, **kwargs):
         if not self._base_params_set:
@@ -84,9 +69,10 @@ class SWAG(torch.nn.Module):
         return self.base(*args, **kwargs)
 
     def sample(self, scale=1.0, cov=False, seed=None, block=False, fullrank=True):
+        if self.n_models == 0:
+            logger.warning("No parameters collected yet, you should first run collect_model!")
         if seed is not None:
             torch.manual_seed(seed)
-
         if not block:
             self.sample_fullrank(scale, cov, fullrank)
         else:
@@ -171,7 +157,7 @@ class SWAG(torch.nn.Module):
         samples_list = unflatten_like(sample, mean_list)
 
         for (module, name), sample in zip(self.params, samples_list):
-            module.__setattr__(name, sample.to(self.device))
+            module.__setattr__(name, sample)
 
     def collect_model(self, base_model):
         for (module, name), base_param in zip(self.params, base_model.parameters()):
