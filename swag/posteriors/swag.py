@@ -62,6 +62,14 @@ class SWAG(torch.nn.Module):
             )
         )
         self._base_params_set = False
+        # As parameters are replaced by buffers, add a dummy parameter
+        # to make self.device to work.
+        # See https://stackoverflow.com/a/63477353
+        self.base._dummy_param = torch.nn.Parameter(torch.empty(0))
+
+    @property
+    def device(self):
+        return self.base._dummy_param.device
 
     def forward(self, *args, **kwargs):
         if not self._base_params_set:
@@ -157,7 +165,7 @@ class SWAG(torch.nn.Module):
         samples_list = unflatten_like(sample, mean_list)
 
         for (module, name), sample in zip(self.params, samples_list):
-            module.__setattr__(name, sample)
+            module.__setattr__(name, sample.to(self.device))
 
     def collect_model(self, base_model):
         for (module, name), base_param in zip(self.params, base_model.parameters()):
