@@ -19,27 +19,6 @@ from ..utils import flatten, unflatten_like
 logger = logging.getLogger(__name__)
 
 
-def swag_parameters(module, params, no_cov_mat=True):
-    for name in list(module._parameters.keys()):
-        if module._parameters[name] is None:
-            continue
-        data = module._parameters[name].data
-        module._parameters.pop(name)
-        # Add dummy values also for the original parameter names, as
-        # they are required for printing the model without errors.
-        # Sampling will overwrite the values.
-        module.register_buffer(name, data.new(data.size()).zero_())
-        module.register_buffer("%s_mean" % name, data.new(data.size()).zero_())
-        module.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
-
-        if no_cov_mat is False:
-            module.register_buffer(
-                "%s_cov_mat_sqrt" % name, data.new_empty((0, data.numel())).zero_()
-            )
-
-        params.append((module, name))
-
-
 class SWAG(torch.nn.Module):
 
     def __init__(
@@ -49,6 +28,7 @@ class SWAG(torch.nn.Module):
 
         self.register_buffer("n_models", torch.zeros([1], dtype=torch.long))
         self.params = list()
+        self.tied_params = list()
 
         self.no_cov_mat = no_cov_mat
         self.max_num_models = max_num_models
@@ -56,16 +36,46 @@ class SWAG(torch.nn.Module):
         self.var_clamp = var_clamp
 
         self.base = base(*args, **kwargs)
-        self.base.apply(
-            lambda module: swag_parameters(
-                module=module, params=self.params, no_cov_mat=self.no_cov_mat
-            )
-        )
+        self._initialize_parameters()
         self._base_params_set = False
         # As parameters are replaced by buffers, add a dummy parameter
         # to make self.device to work.
         # See https://stackoverflow.com/a/63477353
         self.base._dummy_param = torch.nn.Parameter(torch.empty(0))
+
+    @staticmethod
+    def parameter_list(model, remove_duplicate=True):
+        """Full list of parameters in the model"""
+        return list(model.named_parameters(recurse=True, remove_duplicate=remove_duplicate))
+
+    def _initialize_parameters(self):
+        """Initialize SWAG parameters from the base model"""
+        memo = {}
+        for full_name, value in self.parameter_list(self.base, remove_duplicate=False):
+            module_path, _, name = full_name.rpartition(".")
+            submodule = self.base.get_submodule(module_path)
+            data = value.data
+            if value in memo:
+                if name in submodule._parameters:
+                    submodule._parameters.pop(name)
+                submodule.register_buffer(name, data.new(data.size()).zero_())
+                self.tied_params.append((full_name, submodule, name) + memo[value])
+                continue
+            memo[value] = (full_name, submodule, name)
+            submodule._parameters.pop(name)
+            # Add dummy values also for the original parameter names, as
+            # they are required for printing the model without errors.
+            # Sampling will overwrite the values.
+            submodule.register_buffer(name, data.new(data.size()).zero_())
+            submodule.register_buffer("%s_mean" % name, data.new(data.size()).zero_())
+            submodule.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
+            if self.no_cov_mat is False:
+                submodule.register_buffer(
+                    "%s_cov_mat_sqrt" % name, data.new_empty((0, data.numel())).zero_()
+                )
+            self.params.append((submodule, name))
+        for target, _, _, source, _, _ in self.tied_params:
+            logger.info("Found tied parameter: %s -> %s", target, source)
 
     @property
     def device(self):
@@ -114,6 +124,8 @@ class SWAG(torch.nn.Module):
                 w = mean + scaled_diag_sample
 
             module.__setattr__(name, w)
+        for _, module, name, _, source_module, source_name in self.tied_params:
+            module.__setattr__(name, source_module.__getattr__(source_name))
 
     def sample_fullrank(self, scale, cov, fullrank):
         scale_sqrt = scale ** 0.5
@@ -166,9 +178,11 @@ class SWAG(torch.nn.Module):
 
         for (module, name), sample in zip(self.params, samples_list):
             module.__setattr__(name, sample.to(self.device))
+        for _, module, name, _, source_module, source_name in self.tied_params:
+            module.__setattr__(name, source_module.__getattr__(source_name))
 
     def collect_model(self, base_model):
-        for (module, name), base_param in zip(self.params, base_model.parameters()):
+        for (module, name), (param_name, base_param) in zip(self.params, self.parameter_list(base_model)):
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
 
