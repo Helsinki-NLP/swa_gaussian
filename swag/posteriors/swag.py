@@ -50,15 +50,14 @@ class SWAG(torch.nn.Module):
 
     def _initialize_parameters(self):
         """Initialize SWAG parameters from the base model"""
+        assert not self.params
+        assert not self.tied_params
         memo = {}
         for full_name, value in self.parameter_list(self.base, remove_duplicate=False):
             module_path, _, name = full_name.rpartition(".")
             submodule = self.base.get_submodule(module_path)
             data = value.data
             if value in memo:
-                if name in submodule._parameters:
-                    submodule._parameters.pop(name)
-                submodule.register_buffer(name, data.new(data.size()).zero_())
                 self.tied_params.append((full_name, submodule, name) + memo[value])
                 continue
             memo[value] = (full_name, submodule, name)
@@ -74,8 +73,13 @@ class SWAG(torch.nn.Module):
                     "%s_cov_mat_sqrt" % name, data.new_empty((0, data.numel())).zero_()
                 )
             self.params.append((submodule, name))
-        for target, _, _, source, _, _ in self.tied_params:
-            logger.info("Found tied parameter: %s -> %s", target, source)
+        for target, tgt_module, tgt_name, source, src_module, src_name in self.tied_params:
+            if tgt_module == src_module:
+                logger.debug("Found tied parameter (same object): %s -> %s", target, source)
+            else:
+                logger.debug("Found tied parameter (separate object): %s -> %s", target, source)
+                tgt_module._parameters.pop(tgt_name)
+                tgt_module.register_buffer(tgt_name, src_module.__getattr__(src_name))
 
     @property
     def device(self):
@@ -125,7 +129,9 @@ class SWAG(torch.nn.Module):
 
             module.__setattr__(name, w)
         for _, module, name, _, source_module, source_name in self.tied_params:
-            module.__setattr__(name, source_module.__getattr__(source_name))
+            # Update tied parameters in separate objects
+            if module != source_module:
+                module.__setattr__(name, source_module.__getattr__(source_name))
 
     def sample_fullrank(self, scale, cov, fullrank):
         scale_sqrt = scale ** 0.5
@@ -179,7 +185,9 @@ class SWAG(torch.nn.Module):
         for (module, name), sample in zip(self.params, samples_list):
             module.__setattr__(name, sample.to(self.device))
         for _, module, name, _, source_module, source_name in self.tied_params:
-            module.__setattr__(name, source_module.__getattr__(source_name))
+            # Update tied parameters in separate objects
+            if module != source_module:
+                module.__setattr__(name, source_module.__getattr__(source_name))
 
     def collect_model(self, base_model):
         for (module, name), (param_name, base_param) in zip(self.params, self.parameter_list(base_model)):
