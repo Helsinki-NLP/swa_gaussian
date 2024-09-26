@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class SWAG(torch.nn.Module):
 
     def __init__(
-            self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, *args, **kwargs
+            self, base, no_cov_mat=True, cov_mat_rank=0, max_num_models=0, var_clamp=1e-30, *args, **kwargs
     ):
         super(SWAG, self).__init__()
 
@@ -31,6 +31,7 @@ class SWAG(torch.nn.Module):
         self.tied_params = list()
 
         self.no_cov_mat = no_cov_mat
+        self.cov_mat_rank = cov_mat_rank
         self.max_num_models = max_num_models
 
         self.var_clamp = var_clamp
@@ -70,7 +71,7 @@ class SWAG(torch.nn.Module):
             submodule.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
             if self.no_cov_mat is False:
                 submodule.register_buffer(
-                    "%s_cov_mat_sqrt" % name, data.new_empty((0, data.numel())).zero_()
+                    "%s_cov_mat_sqrt" % name, data.new_empty((self.cov_mat_rank, data.numel())).zero_()
                 )
             self.params.append((submodule, name))
         for target, tgt_module, tgt_name, source, src_module, src_name in self.tied_params:
@@ -219,6 +220,8 @@ class SWAG(torch.nn.Module):
 
             module.__setattr__("%s_mean" % name, mean)
             module.__setattr__("%s_sq_mean" % name, sq_mean)
+        if self.no_cov_mat is False and self.n_models < self.max_num_models:
+            self.cov_mat_rank += 1
         self.n_models.add_(1)
 
     def load_state_dict(self, state_dict, strict=True):
