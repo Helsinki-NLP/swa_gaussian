@@ -210,8 +210,8 @@ class SWAG(torch.nn.Module):
                 cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
 
                 # block covariance matrices, store deviation from current mean
-                dev = (base_param.data - mean).view(-1, 1)
-                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
+                dev = (base_param.data - mean).reshape(-1, 1)
+                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.reshape(-1, 1).t()), dim=0)
 
                 # remove first column if we have stored too many models
                 if (self.n_models.item() + 1) > self.max_num_models:
