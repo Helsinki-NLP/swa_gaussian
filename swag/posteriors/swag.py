@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 class SWAG(torch.nn.Module):
 
     def __init__(
-            self, base, no_cov_mat=True, cov_mat_rank=0, max_num_models=0, var_clamp=1e-30, *args, **kwargs
+            self, base, no_cov_mat=True, cov_mat_rank=0, max_num_models=0, var_clamp=1e-30,
+            module_prefix_list=None, *args, **kwargs
     ):
         super(SWAG, self).__init__()
 
@@ -33,8 +34,8 @@ class SWAG(torch.nn.Module):
         self.no_cov_mat = no_cov_mat
         self.cov_mat_rank = cov_mat_rank
         self.max_num_models = max_num_models
-
         self.var_clamp = var_clamp
+        self.module_prefix_list = module_prefix_list
 
         self.base = base(*args, **kwargs)
         self._initialize_parameters()
@@ -48,6 +49,18 @@ class SWAG(torch.nn.Module):
     def parameter_list(model, remove_duplicate=True):
         """Full list of parameters in the model"""
         return list(model.named_parameters(recurse=True, remove_duplicate=remove_duplicate))
+
+    def variance_enabled(self, param_name):
+        """Return whether variance estimation is enabled for this parameter"""
+        if not hasattr(self, 'module_prefix_list') or self.module_prefix_list is None:
+            return True
+        return any(param_name.startswith(prefix) for prefix in self.module_prefix_list)
+
+    def covariance_enabled(self, param_name):
+        """Return whether covariance estimation is enabled for this parameter"""
+        if self.no_cov_mat:
+            return False
+        return self.variance_enabled(param_name)
 
     def _initialize_parameters(self):
         """Initialize SWAG parameters from the base model"""
@@ -68,12 +81,15 @@ class SWAG(torch.nn.Module):
             # Sampling will overwrite the values.
             submodule.register_buffer(name, data.new(data.size()).zero_())
             submodule.register_buffer("%s_mean" % name, data.new(data.size()).zero_())
-            submodule.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
-            if self.no_cov_mat is False:
-                submodule.register_buffer(
-                    "%s_cov_mat_sqrt" % name, data.new_empty((self.cov_mat_rank, data.numel())).zero_()
-                )
-            self.params.append((submodule, name))
+            if self.variance_enabled(full_name):
+                if hasattr(self, 'module_prefix_list') and self.module_prefix_list:
+                    logger.debug("Enabling variance estimation for %s", full_name)
+                submodule.register_buffer("%s_sq_mean" % name, data.new(data.size()).zero_())
+                if self.covariance_enabled(full_name):
+                    submodule.register_buffer(
+                        "%s_cov_mat_sqrt" % name, data.new_empty((self.cov_mat_rank, data.numel())).zero_()
+                    )
+            self.params.append((submodule, name, full_name))
         for target, tgt_module, tgt_name, source, src_module, src_name in self.tied_params:
             if tgt_module == src_module:
                 logger.debug("Found tied parameter (same object): %s -> %s", target, source)
@@ -91,122 +107,141 @@ class SWAG(torch.nn.Module):
             logger.warning("You should first sample parameters for the base model!")
         return self.base(*args, **kwargs)
 
-    def sample(self, scale=1.0, cov=False, seed=None, block=False, fullrank=True):
+    def sample(self, scale=1.0, cov=False, seed=None, block=False):
         if self.n_models == 0:
             logger.warning("No parameters collected yet, you should first run collect_model!")
         if seed is not None:
             torch.manual_seed(seed)
         if not block:
-            self.sample_fullrank(scale, cov, fullrank)
+            self.sample_fullrank(scale, cov)
         else:
-            self.sample_blockwise(scale, cov, fullrank)
+            self.sample_blockwise(scale, cov)
         self._base_params_set = True
 
-    def sample_blockwise(self, scale, cov, fullrank):
-        for module, name in self.params:
+    def sample_blockwise(self, scale, cov):
+        """Sample with blockwise covariance estimates (one parameter at a time)"""
+        for (module, name, full_name) in self.params:
+
             mean = module.__getattr__("%s_mean" % name)
+
+            if not self.variance_enabled(full_name):
+                module.__setattr__(name, mean.detach().clone())
+                continue
 
             sq_mean = module.__getattr__("%s_sq_mean" % name)
             eps = torch.randn_like(mean)
-
             var = torch.clamp(sq_mean - mean ** 2, self.var_clamp)
-
             scaled_diag_sample = scale * torch.sqrt(var) * eps
 
-            if cov is True:
+            if cov is True and self.covariance_enabled(full_name):
                 cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
                 eps = cov_mat_sqrt.new_empty((cov_mat_sqrt.size(0), 1)).normal_()
                 cov_sample = (
                     scale / ((self.max_num_models - 1) ** 0.5)
                 ) * cov_mat_sqrt.t().matmul(eps).view_as(mean)
-
-                if fullrank:
-                    w = mean + scaled_diag_sample + cov_sample
-                else:
-                    w = mean + scaled_diag_sample
-
+                w = mean + scaled_diag_sample + cov_sample
             else:
                 w = mean + scaled_diag_sample
 
             module.__setattr__(name, w)
+
         for _, module, name, _, source_module, source_name in self.tied_params:
             # Update tied parameters in separate objects
             if module != source_module:
                 module.__setattr__(name, source_module.__getattr__(source_name))
 
-    def sample_fullrank(self, scale, cov, fullrank):
+    def sample_fullrank(self, scale, cov):
+        """Sample with full covariance estimates"""
         scale_sqrt = scale ** 0.5
-
         mean_list = []
         sq_mean_list = []
 
         if cov:
             cov_mat_sqrt_list = []
 
-        for (module, name) in self.params:
+        var_params = []
+        mean_params = []
+        for (module, name, full_name) in self.params:
+            if self.variance_enabled(full_name):
+                var_params.append((module, name, full_name))
+            else:
+                mean_params.append((module, name, full_name))
+
+        # Set parameters that use only mean
+        for (module, name, _) in mean_params:
+            mean = module.__getattr__("%s_mean" % name)
+            module.__setattr__(name, mean.detach().clone())
+
+        # Parameters with (co)variance estimation
+        for (module, name, full_name) in var_params:
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
 
-            if cov:
+            if cov and self.covariance_enabled(full_name):
                 cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
                 cov_mat_sqrt_list.append(cov_mat_sqrt.cpu())
 
             mean_list.append(mean.cpu())
             sq_mean_list.append(sq_mean.cpu())
 
-        mean = flatten(mean_list)
-        sq_mean = flatten(sq_mean_list)
+        if var_params:
+            mean = flatten(mean_list)
+            sq_mean = flatten(sq_mean_list)
 
-        # draw diagonal variance sample
-        var = torch.clamp(sq_mean - mean ** 2, self.var_clamp)
-        var_sample = var.sqrt() * torch.randn_like(var, requires_grad=False)
+            # draw diagonal variance sample
+            var = torch.clamp(sq_mean - mean ** 2, self.var_clamp)
+            var_sample = var.sqrt() * torch.randn_like(var, requires_grad=False)
 
-        # if covariance draw low rank sample
-        if cov:
-            cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1)
+            # if covariance, draw low rank sample
+            if cov:
+                cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1)
 
-            cov_sample = cov_mat_sqrt.t().matmul(
-                cov_mat_sqrt.new_empty(
-                    (cov_mat_sqrt.size(0),), requires_grad=False
-                ).normal_()
-            )
-            cov_sample /= (self.max_num_models - 1) ** 0.5
+                cov_sample = cov_mat_sqrt.t().matmul(
+                    cov_mat_sqrt.new_empty(
+                        (cov_mat_sqrt.size(0),), requires_grad=False
+                    ).normal_()
+                )
+                cov_sample /= (self.max_num_models - 1) ** 0.5
 
-            rand_sample = var_sample + cov_sample
-        else:
-            rand_sample = var_sample
+                rand_sample = var_sample + cov_sample
+            else:
+                rand_sample = var_sample
 
-        # update sample with mean and scale
-        sample = mean + scale_sqrt * rand_sample
-        sample = sample.unsqueeze(0)
+            # update sample with mean and scale
+            sample = mean + scale_sqrt * rand_sample
+            sample = sample.unsqueeze(0)
 
-        # unflatten new sample like the mean sample
-        samples_list = unflatten_like(sample, mean_list)
+            # unflatten new sample like the mean sample
+            samples_list = unflatten_like(sample, mean_list)
 
-        for (module, name), sample in zip(self.params, samples_list):
-            module.__setattr__(name, sample.to(self.device))
+            for (module, name, _), sample in zip(var_params, samples_list):
+                module.__setattr__(name, sample.to(self.device))
+
         for _, module, name, _, source_module, source_name in self.tied_params:
             # Update tied parameters in separate objects
             if module != source_module:
                 module.__setattr__(name, source_module.__getattr__(source_name))
 
     def collect_model(self, base_model):
-        for (module, name), (param_name, base_param) in zip(self.params, self.parameter_list(base_model)):
-            mean = module.__getattr__("%s_mean" % name)
-            sq_mean = module.__getattr__("%s_sq_mean" % name)
+        for (module, name, _), (full_name, base_param) in zip(self.params, self.parameter_list(base_model)):
 
             # first moment
+            mean = module.__getattr__("%s_mean" % name)
             mean = mean * self.n_models.item() / (
                 self.n_models.item() + 1.0
             ) + base_param.data / (self.n_models.item() + 1.0)
+            module.__setattr__("%s_mean" % name, mean)
 
             # second moment
-            sq_mean = sq_mean * self.n_models.item() / (
-                self.n_models.item() + 1.0
-            ) + base_param.data ** 2 / (self.n_models.item() + 1.0)
+            if self.variance_enabled(full_name):
+                sq_mean = module.__getattr__("%s_sq_mean" % name)
+                sq_mean = sq_mean * self.n_models.item() / (
+                    self.n_models.item() + 1.0
+                ) + base_param.data ** 2 / (self.n_models.item() + 1.0)
+                module.__setattr__("%s_sq_mean" % name, sq_mean)
 
             # square root of covariance matrix
-            if self.no_cov_mat is False:
+            if self.covariance_enabled(full_name):
                 cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
 
                 # block covariance matrices, store deviation from current mean
@@ -218,8 +253,6 @@ class SWAG(torch.nn.Module):
                     cov_mat_sqrt = cov_mat_sqrt[1:, :]
                 module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
 
-            module.__setattr__("%s_mean" % name, mean)
-            module.__setattr__("%s_sq_mean" % name, sq_mean)
         if self.no_cov_mat is False and self.n_models < self.max_num_models:
             self.cov_mat_rank += 1
         self.n_models.add_(1)
@@ -228,7 +261,7 @@ class SWAG(torch.nn.Module):
         if not self.no_cov_mat:
             n_models = state_dict["n_models"].item()
             rank = min(n_models, self.max_num_models)
-            for module, name in self.params:
+            for module, name, _ in self.params:
                 mean = module.__getattr__("%s_mean" % name)
                 module.__setattr__(
                     "%s_cov_mat_sqrt" % name,
@@ -241,7 +274,7 @@ class SWAG(torch.nn.Module):
         sq_mean_list = []
         cov_mat_list = []
 
-        for module, name in self.params:
+        for module, name, _ in self.params:
             mean_list.append(module.__getattr__("%s_mean" % name).cpu().numpy().ravel())
             sq_mean_list.append(
                 module.__getattr__("%s_sq_mean" % name).cpu().numpy().ravel()
@@ -261,7 +294,7 @@ class SWAG(torch.nn.Module):
 
     def import_numpy_weights(self, w):
         k = 0
-        for module, name in self.params:
+        for module, name, _ in self.params:
             mean = module.__getattr__("%s_mean" % name)
             s = np.prod(mean.shape)
             module.__setattr__(name, mean.new_tensor(w[k : k + s].reshape(mean.shape)))
@@ -271,7 +304,7 @@ class SWAG(torch.nn.Module):
         mean_list = []
         var_list = []
         cov_mat_root_list = []
-        for module, name in self.params:
+        for module, name, _ in self.params:
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
             cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
@@ -350,7 +383,7 @@ class SWAG(torch.nn.Module):
         mean_list, var_list, covar_mat_root_list = self.generate_mean_var_covar()
 
         if vec is None:
-            param_list = [getattr(param, name) for param, name in self.params]
+            param_list = [getattr(param, name) for param, name, _ in self.params]
         else:
             param_list = unflatten_like(vec, mean_list)
 

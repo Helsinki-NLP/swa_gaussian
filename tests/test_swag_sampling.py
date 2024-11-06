@@ -53,7 +53,7 @@ class Test_SWAG_Sampling(unittest.TestCase):
         mean_list = []
         sq_mean_list = []
         cov_mat_sqrt_list = []
-        for (module, name), param in zip(swag_model.params, model.parameters()):
+        for (module, name, full_name), param in zip(swag_model.params, model.parameters()):
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
             cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
@@ -88,7 +88,7 @@ class Test_SWAG_Sampling(unittest.TestCase):
             for _ in range(2000):
                 swag_model.sample(scale=scale, cov=True)
                 curr_pars = []
-                for (module, name) in swag_model.params:
+                for (module, name, full_name) in swag_model.params:
                     curr_pars.append(getattr(module, name))
                 dev = flatten(curr_pars) - mean
 
@@ -136,7 +136,7 @@ class Test_SWAG_Sampling(unittest.TestCase):
         # check to ensure parameters have the correct sizes
         mean_list = []
         sq_mean_list = []
-        for (module, name), param in zip(swag_model.params, model.parameters()):
+        for (module, name, full_name), param in zip(swag_model.params, model.parameters()):
             mean = module.__getattr__("%s_mean" % name)
             sq_mean = module.__getattr__("%s_sq_mean" % name)
 
@@ -160,7 +160,7 @@ class Test_SWAG_Sampling(unittest.TestCase):
             for _ in range(20):
                 swag_model.sample(scale=scale, cov=False)
                 curr_pars = []
-                for (module, name) in swag_model.params:
+                for (module, name, full_name) in swag_model.params:
                     curr_pars.append(getattr(module, name))
 
                 curr_probs = dist.cdf(flatten(curr_pars))
