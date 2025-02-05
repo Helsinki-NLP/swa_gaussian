@@ -26,7 +26,7 @@ setup(
         "tqdm>=4.26.0",
         "numpy>=1.14.3",
         "torchvision>=0.2.1",
-        "gpytorch>=0.1.0rc4",
+        "gpytorch>=0.1.0rc4,<1.14.0",
         "tabulate>=0.8.2",
         "scipy>=1.1.0",
         "setuptools>=39.1.0",
