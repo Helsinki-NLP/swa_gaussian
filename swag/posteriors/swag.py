@@ -257,7 +257,7 @@ class SWAG(torch.nn.Module):
             self.cov_mat_rank += 1
         self.n_models.add_(1)
 
-    def load_state_dict(self, state_dict, strict=True):
+    def load_state_dict(self, state_dict, **kwargs):
         if not self.no_cov_mat:
             n_models = state_dict["n_models"].item()
             rank = min(n_models, self.max_num_models)
@@ -267,7 +267,7 @@ class SWAG(torch.nn.Module):
                     "%s_cov_mat_sqrt" % name,
                     mean.new_empty((rank, mean.numel())).zero_(),
                 )
-        super(SWAG, self).load_state_dict(state_dict, strict)
+        super(SWAG, self).load_state_dict(state_dict, **kwargs)
 
     def export_numpy_params(self, export_cov_mat=False):
         mean_list = []
